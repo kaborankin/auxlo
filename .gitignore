@@ -92,6 +92,7 @@ tsc-error.txt
 tsc2.txt
 tsc*.log
 dev_log.txt
+proxy_log.txt
 .dockerenv
 
 # Archived snapshots from other projects / prior migrations (keep local)
