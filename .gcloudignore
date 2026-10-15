@@ -1,0 +1,25 @@
+.git/
+node_modules/
+.next/
+ai_operator/
+public/videos/
+# Allow only essential public videos
+*.mp4
+!public/video/**/*.mp4
+!public/showreel_optimized.mp4
+!public/showreel_hero.mp4
+*.exe
+*.dll
+*.pyd
+.gemini
+outputs
+memory
+
+# Ignore service-business (client work deployed on Vercel)
+app/\(service-business\)/
+app/api/service-business/
+components/service-business/
+config/service-business/
+lib/service-business/
+deliverables/
+

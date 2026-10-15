@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false
+  },
+  "include": [
+    "next-env.d.ts",
+    "types/service-business.ts",
+    "config/service-business/**/*.ts",
+    "lib/service-business/**/*.ts",
+    "components/service-business/**/*.tsx",
+    "app/(service-business)/**/*.tsx",
+    "app/api/service-enquiries/**/*.ts"
+  ],
+  "exclude": ["node_modules"]
+}

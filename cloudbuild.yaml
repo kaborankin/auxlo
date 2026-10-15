@@ -1,0 +1,88 @@
+steps:
+  # Run database migrations for Auxlo (schema.prisma)
+  - id: 'run-migrations-auxlo'
+    name: 'gcr.io/cloud-builders/npm'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        export DATABASE_URL="$$DATABASE_URL_MIGRATIONS"
+        wget https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.11.4/cloud-sql-proxy.linux.amd64 -O cloud-sql-proxy
+        chmod +x cloud-sql-proxy
+        ./cloud-sql-proxy --port 5432 auxlo-503209:europe-west2:auxlo-db &
+        PROXY_PID=$$!
+        sleep 5
+        npm install --legacy-peer-deps
+        npx prisma generate --schema=prisma/schema.prisma
+        npx prisma migrate deploy --schema=prisma/schema.prisma
+        kill $$PROXY_PID || true
+    secretEnv: ['DATABASE_URL_MIGRATIONS']
+
+  # Build the container image with increased memory
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '--build-arg', 'BUILDKIT_INLINE_CACHE=1',
+      '-f', 'Dockerfile',
+      '-t', 'europe-west2-docker.pkg.dev/$PROJECT_ID/auxlo-repo/auxlo-app:${_SHORT_SHA}',
+      '-t', 'europe-west2-docker.pkg.dev/$PROJECT_ID/auxlo-repo/auxlo-app:latest',
+      '.'
+    ]
+    env:
+      - 'DOCKER_BUILDKIT=1'
+
+  # Push the container image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'europe-west2-docker.pkg.dev/$PROJECT_ID/auxlo-repo/auxlo-app:${_SHORT_SHA}']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'europe-west2-docker.pkg.dev/$PROJECT_ID/auxlo-repo/auxlo-app:latest']
+
+  # Deploy container image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args: [
+      'run', 'deploy', '${_SERVICE_NAME}',
+      '--image', 'europe-west2-docker.pkg.dev/$PROJECT_ID/auxlo-repo/auxlo-app:${_SHORT_SHA}',
+      '--region', '${_REGION}',
+      '--platform', 'managed',
+      '--memory', '${_MEMORY}',
+      '--cpu', '${_CPU}',
+      '--max-instances', '${_MAX_INSTANCES}',
+      '--port', '8080'
+    ]
+
+  # Update Cloud Run with all environment variables and secrets
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'services'
+      - 'update'
+      - '${_SERVICE_NAME}'
+      - '--region=${_REGION}'
+      - '--set-env-vars=NODE_ENV=production,GCS_BUCKET_NAME=auxlo-leads-data,GOOGLE_CLOUD_PROJECT_ID=auxlo-503209,NEXTAUTH_URL=https://auxlo.uk,FRONTEND_URL=https://auxlo.uk,ADMIN_EMAILS=hello@auxlo.uk,INSTANCE_CONNECTION_NAME=auxlo-503209:europe-west2:auxlo-db'
+      - '--update-secrets=DATABASE_URL=DATABASE_URL:latest,NEXTAUTH_SECRET=NEXTAUTH_SECRET:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,PRINTFUL_API_KEY=PRINTFUL_API_KEY:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest,STRIPE_WEBHOOK_SECRET=STRIPE_WEBHOOK_SECRET:latest'
+
+# Substitutions
+substitutions:
+  _SHORT_SHA: 'latest'
+  _REGION: 'europe-west1'
+  _SERVICE_NAME: 'auxlo-app'
+  _MEMORY: '1Gi'
+  _CPU: '1'
+  _MAX_INSTANCES: '10'
+
+# Options
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
+
+# Timeout
+timeout: '1800s'
+
+# Secrets
+availableSecrets:
+  secretManager:
+    - versionName: 'projects/auxlo-503209/secrets/DATABASE_URL_MIGRATIONS/versions/latest'
+      env: 'DATABASE_URL_MIGRATIONS'

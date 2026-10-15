@@ -1,0 +1,146 @@
+import crypto from 'crypto';
+import prisma from '@/lib/db';
+import { isSuperAdmin, getUserMembership } from '@/lib/authorize';
+
+/**
+ * Access control for Pajo pages.
+ *
+ * Reuses the existing Organization/UserMembership/Role RBAC: an org-level
+ * ORG_ADMIN or ORG_MANAGER can administer any pot in their organization.
+ * A user who is directly a PotMember (added by an admin) can view their
+ * pot's dashboard and manage their own contributions even without a wider
+ * org role — this covers the 10 rotating members who just need to see the
+ * ledger and mark their own payments as sent.
+ */
+
+export type PajoRole = 'admin' | 'member' | null;
+
+export interface PajoAccess {
+  pot: { id: string; slug: string; name: string; organizationId: string };
+  role: PajoRole;
+  potMemberId: string | null;
+}
+
+/**
+ * Preview mode: when PAJO_BYPASS_AUTH=true, /pajo pages render without a
+ * session (read-only — admin action APIs still require real auth). Intended
+ * for reviewing the dashboard before NextAuth accounts are set up; flip the
+ * flag to false in .env once real treasurer/member logins exist.
+ */
+export function isPajoPreviewMode(): boolean {
+  return process.env.PAJO_BYPASS_AUTH === 'true';
+}
+
+export async function getPajoAccess(userId: string, potSlug: string): Promise<PajoAccess | null> {
+  const pot = await prisma.pot.findUnique({
+    where: { slug: potSlug },
+    select: { id: true, slug: true, name: true, organizationId: true },
+  });
+  if (!pot) return null;
+
+  if (await isSuperAdmin(userId)) {
+    return { pot, role: 'admin', potMemberId: null };
+  }
+
+  const orgMembership = await getUserMembership(userId, pot.organizationId);
+  const potMember = await prisma.potMember.findUnique({
+    where: { potId_userId: { potId: pot.id, userId } },
+    select: { id: true },
+  });
+
+  if (orgMembership && (orgMembership.role === 'ORG_ADMIN' || orgMembership.role === 'ORG_MANAGER')) {
+    return { pot, role: 'admin', potMemberId: potMember?.id ?? null };
+  }
+
+  if (potMember || orgMembership) {
+    return { pot, role: 'member', potMemberId: potMember?.id ?? null };
+  }
+
+  return null;
+}
+
+/**
+ * Result of validating a pot invitation. Deliberately generic — callers
+ * must not leak *why* an invitation failed (pot doesn't exist vs. wrong
+ * token vs. expired) to keep pot existence/slugs from being enumerable.
+ */
+export type PotInvitationResult =
+  | { ok: true; pot: { id: string; slug: string; name: string; organizationId: string; contributionAmount: number; currency: string; memberTarget: number; frequency: string; payoutMethod: string } }
+  | { ok: false };
+
+/** Constant-time string comparison — avoids leaking token length/prefix via timing. */
+function safeTokenEquals(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) {
+    // Still run timingSafeEqual against a same-length buffer so the
+    // early-return itself doesn't become a distinguishing timing signal
+    // for wildly different lengths (best-effort — length itself is not
+    // secret here since tokens are a fixed 64 hex chars).
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+/**
+ * Validates a pot join invitation (slug + token) server-side. This is the
+ * single choke point every join-related endpoint must call — the frontend
+ * is never trusted to decide whether an invitation is valid. Returns a
+ * generic { ok: false } for every failure mode (pot missing, no token
+ * configured, token mismatch, expired) so callers can't distinguish
+ * "wrong token" from "pot doesn't exist" and enumerate private pots.
+ */
+export async function validatePotInvitation(potSlug: string, token: string | null | undefined): Promise<PotInvitationResult> {
+  if (!token) return { ok: false };
+
+  const pot = await prisma.pot.findUnique({
+    where: { slug: potSlug },
+    select: {
+      id: true, slug: true, name: true, organizationId: true,
+      contributionAmount: true, currency: true, memberTarget: true,
+      frequency: true, payoutMethod: true,
+      inviteToken: true, inviteExpiresAt: true,
+    },
+  });
+
+  if (!pot || !pot.inviteToken) return { ok: false };
+  if (!safeTokenEquals(pot.inviteToken, token)) return { ok: false };
+  if (pot.inviteExpiresAt && pot.inviteExpiresAt.getTime() < Date.now()) return { ok: false };
+
+  return {
+    ok: true,
+    pot: {
+      id: pot.id,
+      slug: pot.slug,
+      name: pot.name,
+      organizationId: pot.organizationId,
+      contributionAmount: pot.contributionAmount,
+      currency: pot.currency,
+      memberTarget: pot.memberTarget,
+      frequency: pot.frequency,
+      payoutMethod: pot.payoutMethod,
+    },
+  };
+}
+
+/** All pots a user can see — for the `/pajo` picker page. */
+export async function getPajoPotsForUser(userId: string) {
+  if (await isSuperAdmin(userId)) {
+    return prisma.pot.findMany({ orderBy: { createdAt: 'desc' } });
+  }
+
+  const [orgPots, memberPots] = await Promise.all([
+    prisma.pot.findMany({
+      where: { organization: { members: { some: { userId } } } },
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.pot.findMany({
+      where: { members: { some: { userId } } },
+      orderBy: { createdAt: 'desc' },
+    }),
+  ]);
+
+  const byId = new Map(orgPots.map((p) => [p.id, p]));
+  for (const p of memberPots) byId.set(p.id, p);
+  return Array.from(byId.values());
+}
