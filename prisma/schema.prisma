@@ -1,6 +1,10 @@
 generator client {
-  provider      = "prisma-client-js"
-  binaryTargets = ["native", "debian-openssl-3.0.x"]
+  provider = "prisma-client-js"
+  // Keep every runtime we deploy to. The Cloud Run image is Alpine (musl) on
+  // Alpine 3.21, which ships OpenSSL 3.x - so the musl + openssl-3.0.x engine
+  // is required there. 'native' covers local dev (Windows/macOS/Linux) and
+  // 'debian-openssl-3.0.x' covers any glibc-based environment.
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {

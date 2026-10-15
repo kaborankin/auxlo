@@ -1,8 +1,13 @@
 FROM node:18-alpine AS base
 
+# OpenSSL runtime libs are required by Prisma's query engine. Alpine ships
+# OpenSSL 3.x (libssl.so.3), which is why prisma/schema.prisma declares the
+# `linux-musl-openssl-3.0.x` binary target. libc6-compat is needed by some
+# Node native modules on musl.
+RUN apk add --no-cache openssl libc6-compat
+
 # Install dependencies only when needed
 FROM base AS deps
-RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 # Install dependencies based on the preferred package manager

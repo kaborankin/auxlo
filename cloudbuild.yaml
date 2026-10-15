@@ -50,7 +50,11 @@ steps:
       '--memory', '${_MEMORY}',
       '--cpu', '${_CPU}',
       '--max-instances', '${_MAX_INSTANCES}',
-      '--port', '8080'
+      '--port', '8080',
+      # DATABASE_URL connects over the Cloud SQL unix socket
+      # (/cloudsql/auxlo-503209:europe-west2:auxlo-db), so the instance MUST be
+      # mounted here or Prisma cannot reach the database at runtime.
+      '--add-cloudsql-instances', 'auxlo-503209:europe-west2:auxlo-db'
     ]
 
   # Update Cloud Run with all environment variables and secrets
