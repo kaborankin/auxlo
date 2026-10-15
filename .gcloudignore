@@ -23,3 +23,30 @@ config/service-business/
 lib/service-business/
 deliverables/
 
+# CRITICAL: local tool config containing live API keys - must never reach the build
+config.yaml
+config.yml
+.cline/
+
+# Large local archives and downloaded binaries
+*.tgz
+*.tar.gz
+source.tgz
+latest_source.tgz
+cloud-sql-proxy
+cloud-sql-proxy.*
+
+# Local logs and scratch output
+*.log
+dev_log.txt
+pre_dump.txt
+file_list.txt
+pg-*.txt
+tsc*.txt
+
+# Archived snapshots from other projects
+_legacy/
+.env
+.env.*
+!.env.example
+

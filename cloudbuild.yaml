@@ -23,6 +23,7 @@ steps:
     args: [
       'build',
       '--build-arg', 'BUILDKIT_INLINE_CACHE=1',
+      '--build-arg', 'NEXT_PUBLIC_SITE_URL=https://auxlo.uk',
       '-f', 'Dockerfile',
       '-t', 'europe-west2-docker.pkg.dev/$PROJECT_ID/auxlo-repo/auxlo-app:${_SHORT_SHA}',
       '-t', 'europe-west2-docker.pkg.dev/$PROJECT_ID/auxlo-repo/auxlo-app:latest',
