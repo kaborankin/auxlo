@@ -41,12 +41,22 @@ export async function middleware(req: NextRequest) {
   // arrived via a pot join link (?token=...) doesn't lose that invitation
   // context — onboarding sends them back to this exact URL once they've
   // picked a role. Treasurers just ignore returnTo and go create a pot.
+  //
+  // CRITICAL: this must only ever apply to *page* navigations. Redirecting an
+  // API request hands the onboarding HTML to a client expecting JSON, which
+  // breaks NextAuth's own endpoints: GET/POST /api/auth/session (used by
+  // useSession() and update()) comes back as HTML -> "Unexpected token '<'",
+  // and POST /api/auth/_log lands on a page route -> 405. That previously left
+  // freshly-signed-up users stuck on "Setting up your account…" forever,
+  // because the session refresh after onboarding never completed.
+  const isApiOrAsset =
+    pathname.startsWith('/api/') || pathname.startsWith('/_next/');
+
   if (
     token &&
     (token as any).status === 'new' &&
-    !pathname.startsWith('/auth/onboard') &&
-    !pathname.startsWith('/api/auth/onboard') &&
-    !pathname.startsWith('/api/auth/signout')
+    !isApiOrAsset &&
+    !pathname.startsWith('/auth/onboard')
   ) {
     const originalDestination = pathname + url.search;
     url.pathname = '/auth/onboard';
