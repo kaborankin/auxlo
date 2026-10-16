@@ -11,6 +11,12 @@ import { isSuperAdmin, getUserMembership } from '@/lib/authorize';
  * pot's dashboard and manage their own contributions even without a wider
  * org role — this covers the 10 rotating members who just need to see the
  * ledger and mark their own payments as sent.
+ *
+ * ISOLATION RULE: an organisation-level membership that is NOT an admin role
+ * (notably CLIENT, which the pot join flow creates) grants no pot access at
+ * all. Circles must stay isolated — joining one pot must never expose another
+ * pot's members, ledger or payouts. Pot access for non-admins therefore
+ * requires an explicit PotMember row.
  */
 
 export type PajoRole = 'admin' | 'member' | null;
@@ -52,8 +58,12 @@ export async function getPajoAccess(userId: string, potSlug: string): Promise<Pa
     return { pot, role: 'admin', potMemberId: potMember?.id ?? null };
   }
 
-  if (potMember || orgMembership) {
-    return { pot, role: 'member', potMemberId: potMember?.id ?? null };
+  // Non-admins need a real PotMember row. A plain org membership (such as the
+  // CLIENT row created when someone joins ONE pot) deliberately does NOT grant
+  // access here — otherwise every member of a circle could open every other
+  // circle in the same organisation.
+  if (potMember) {
+    return { pot, role: 'member', potMemberId: potMember.id };
   }
 
   return null;
@@ -123,15 +133,30 @@ export async function validatePotInvitation(potSlug: string, token: string | nul
   };
 }
 
-/** All pots a user can see — for the `/pajo` picker page. */
+/**
+ * All pots a user can see — for the `/pajo` picker page.
+ *
+ * Admins/managers (and super admins) see every pot in the organisations they
+ * administer. Everyone else sees ONLY the pots they hold a PotMember row for:
+ * an org-level membership such as CLIENT — created automatically when someone
+ * joins a single pot — must not reveal the other circles' ledgers.
+ */
 export async function getPajoPotsForUser(userId: string) {
   if (await isSuperAdmin(userId)) {
     return prisma.pot.findMany({ orderBy: { createdAt: 'desc' } });
   }
 
+  // Organisations where this user is a pot administrator.
+  const adminMemberships = await prisma.userMembership.findMany({
+    where: { userId, role: { in: ['ORG_ADMIN', 'ORG_MANAGER'] } },
+    select: { organizationId: true },
+  });
+  const adminOrgIds = adminMemberships.map((m) => m.organizationId);
+
   const [orgPots, memberPots] = await Promise.all([
+    // `in: []` intentionally matches nothing, so a non-admin gets no pots here.
     prisma.pot.findMany({
-      where: { organization: { members: { some: { userId } } } },
+      where: { organizationId: { in: adminOrgIds } },
       orderBy: { createdAt: 'desc' },
     }),
     prisma.pot.findMany({
