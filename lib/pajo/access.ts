@@ -169,3 +169,92 @@ export async function getPajoPotsForUser(userId: string) {
   for (const p of memberPots) byId.set(p.id, p);
   return Array.from(byId.values());
 }
+
+/** Safe, metadata-only shape of a discoverable pot. Deliberately excludes
+ *  bankDetails, rulesText, inviteToken, member identities, contributions and
+ *  the payout schedule. */
+export interface DiscoverablePot {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  contributionAmount: number;
+  currency: string;
+  frequency: string;
+  memberTarget: number;
+  memberCount: number;
+  payoutMethod: string;
+  organizationName: string;
+  /** The signed-in user's own request state for this pot, if they made one. */
+  myRequestStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | null;
+}
+
+/**
+ * Pots a signed-in NON-member may *discover* — i.e. see advertised, but not
+ * enter. Access to the pot itself still requires a PotMember row (see
+ * getPajoAccess); this list is display-only.
+ *
+ * Guardrails, all deliberate:
+ *  - `openForJoining` must be true — a treasurer opts a pot in. Private pots
+ *    are never listed, whatever the URL guesses.
+ *  - Scoped to organisations the user ALREADY belongs to, so one tenant's
+ *    circles are never advertised to another tenant's members.
+ *  - Excludes pots the user is already in (that's getPajoPotsForUser's job).
+ *  - Returns metadata only. Members, ledger, payouts and bank details are
+ *    never exposed - discovering a circle must not disclose its money.
+ */
+export async function getDiscoverablePotsForUser(userId: string): Promise<DiscoverablePot[]> {
+  const memberships = await prisma.userMembership.findMany({
+    where: { userId },
+    select: { organizationId: true },
+  });
+  const orgIds = memberships.map((m) => m.organizationId);
+  if (orgIds.length === 0) return [];
+
+  const pots = await prisma.pot.findMany({
+    where: {
+      openForJoining: true,
+      status: 'active',
+      organizationId: { in: orgIds },
+      members: { none: { userId } },
+    },
+    select: {
+      id: true,
+      slug: true,
+      name: true,
+      description: true,
+      contributionAmount: true,
+      currency: true,
+      frequency: true,
+      memberTarget: true,
+      payoutMethod: true,
+      organization: { select: { name: true } },
+      _count: { select: { members: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  if (pots.length === 0) return [];
+
+  const requests = await prisma.potJoinRequest.findMany({
+    where: { userId, potId: { in: pots.map((p) => p.id) } },
+    select: { potId: true, status: true },
+  });
+  const statusByPotId = new Map(requests.map((r) => [r.potId, r.status]));
+
+  return pots.map((p) => ({
+    id: p.id,
+    slug: p.slug,
+    name: p.name,
+    description: p.description,
+    contributionAmount: p.contributionAmount,
+    currency: p.currency,
+    frequency: p.frequency,
+    memberTarget: p.memberTarget,
+    memberCount: p._count.members,
+    payoutMethod: p.payoutMethod,
+    organizationName: p.organization.name,
+    myRequestStatus: statusByPotId.get(p.id) ?? null,
+  }));
+}
+

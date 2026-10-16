@@ -6,11 +6,12 @@ import { authOptions } from '@/lib/auth-config';
 import prisma from '@/lib/db';
 import { getPajoHomeDashboard } from '@/lib/pajo/queries';
 import { StatCard } from '@/components/pajo/StatCard';
-import { isPajoPreviewMode } from '@/lib/pajo/access';
+import { isPajoPreviewMode, getDiscoverablePotsForUser } from '@/lib/pajo/access';
 import { StatusPill } from '@/components/pajo/StatusPill';
 import { HomeTopbar } from '@/components/pajo/HomeTopbar';
 import { Sidebar } from '@/components/pajo/Sidebar';
 import { EmptyDashboard } from '@/components/pajo/EmptyDashboard';
+import { DiscoverPots } from '@/components/pajo/DiscoverPots';
 import { timeAgo } from '@/lib/dashboard/format';
 import { CircleDollarSign, Users, Wallet, ArrowUpRight, AlertTriangle } from 'lucide-react';
 
@@ -38,6 +39,8 @@ export default async function PajoHomePage() {
 
   const dashboard = await getPajoHomeDashboard(userId, displayName);
   const { summary, circles, activity } = dashboard;
+  // Advertised circles this user is NOT a member of (metadata only, see access.ts).
+  const discoverablePots = userId ? await getDiscoverablePotsForUser(userId) : [];
   const headerList = await headers();
   const activePath = headerList.get('x-pathname') ?? '/pajo';
 
@@ -185,6 +188,8 @@ export default async function PajoHomePage() {
                 </div>
               )}
             </section>
+
+            <DiscoverPots pots={discoverablePots} />
 
             {activity.length > 0 && (
               <section>

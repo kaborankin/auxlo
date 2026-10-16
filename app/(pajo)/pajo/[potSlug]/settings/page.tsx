@@ -6,6 +6,9 @@ import { getPajoAccess, isPajoPreviewMode } from '@/lib/pajo/access';
 import { getPotBySlug, getPotOverview } from '@/lib/pajo/queries';
 import { SettingsActions } from '@/components/pajo/SettingsActions';
 import { InviteLinkCard } from '@/components/pajo/InviteLinkCard';
+import { PotVisibilityToggle } from '@/components/pajo/PotVisibilityToggle';
+import { JoinRequestQueue } from '@/components/pajo/JoinRequestQueue';
+import { getPendingJoinRequests } from '@/lib/pajo/mutations';
 
 /** Admin-only settings: bank details, cadence, and cycle status. */
 export default async function PotSettingsPage({
@@ -40,6 +43,15 @@ export default async function PotSettingsPage({
   const overview = await getPotOverview(potSlug);
   if (!overview) notFound();
 
+  // Treasurer review queue. This page is already admin-only (see the access
+  // check above), so only a pot admin ever loads this.
+  const pendingJoinRequests = (await getPendingJoinRequests(pot.id)).map((r) => ({
+    id: r.id,
+    message: r.message,
+    createdAt: r.createdAt.toISOString(),
+    user: r.user,
+  }));
+
   return (
     <div className="max-w-2xl space-y-6">
       <SettingsActions 
@@ -49,6 +61,10 @@ export default async function PotSettingsPage({
         memberTarget={pot.memberTarget}
         hasActiveCycle={!!overview.activeCycle}
       />
+
+      {!preview ? <PotVisibilityToggle potSlug={potSlug} initialOpen={pot.openForJoining} /> : null}
+
+      {!preview ? <JoinRequestQueue requests={pendingJoinRequests} /> : null}
 
       {!preview ? <InviteLinkCard potSlug={potSlug} /> : null}
 

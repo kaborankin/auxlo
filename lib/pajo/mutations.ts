@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import prisma from '@/lib/db';
 import { createAuditLog } from '@/lib/audit';
+import { emitNotification } from './notifications';
 import { buildDefaultRulesText, computePayoutForWeek, escalateLatePayment } from './rules';
 import type { PotPayoutMethod, PotMember, PotPosition, PotManagedBy } from '@prisma/client';
 
@@ -789,3 +790,247 @@ export async function startPotCycle(input: StartCycleInput) {
     return { cycle, weeks };
   });
 }
+
+// ============================================================================
+// Discovery & join requests
+//
+// A treasurer can advertise a pot (`openForJoining`). Members who already
+// belong to the organisation can then *see* it in the /pajo discover list
+// (metadata only - see getDiscoverablePotsForUser) and ask to join. Nothing
+// here grants access on its own: a PENDING PotJoinRequest is inert until a pot
+// admin approves it, which is what creates the PotMember row.
+// ============================================================================
+
+export interface SetPotOpenForJoiningInput {
+  potId: string;
+  organizationId: string;
+  actorId: string;
+  actorEmail: string;
+  open: boolean;
+}
+
+/**
+ * Treasurer opt-in/out for discovery. When open, the pot is advertised in the
+ * /pajo discover list and members may request to join. Switching it off hides
+ * the pot again but deliberately leaves outstanding requests alone, so a
+ * treasurer can still work through people who already asked.
+ */
+export async function setPotOpenForJoining(input: SetPotOpenForJoiningInput) {
+  const { potId, organizationId, actorId, actorEmail, open } = input;
+
+  const pot = await prisma.pot.update({
+    where: { id: potId },
+    data: { openForJoining: open },
+  });
+
+  await createAuditLog({
+    organizationId, actorId, actorEmail,
+    action: open ? 'pot.opened_for_joining' : 'pot.closed_for_joining',
+    resource: `pot:${pot.id}`, resourceType: 'pot',
+    details: { potId: pot.id, slug: pot.slug, openForJoining: pot.openForJoining },
+  });
+
+  return pot;
+}
+
+export interface RequestToJoinPotInput {
+  potSlug: string;
+  userId: string;
+  userEmail: string;
+  message?: string | null;
+}
+
+/**
+ * A signed-in non-member asks to join an open pot. Creates a PENDING
+ * PotJoinRequest (unique per pot+user, so re-requesting is idempotent) and
+ * notifies the pot's admins. This grants NO access - a treasurer must approve
+ * it (see reviewJoinRequest).
+ */
+export async function requestToJoinPot(input: RequestToJoinPotInput) {
+  const { potSlug, userId, userEmail, message } = input;
+
+  const pot = await prisma.pot.findUnique({
+    where: { slug: potSlug },
+    select: {
+      id: true, name: true, slug: true, organizationId: true,
+      openForJoining: true, memberTarget: true,
+      _count: { select: { members: true } },
+    },
+  });
+  if (!pot) throw new PajoIntegrityError('POT_NOT_FOUND', 'This circle could not be found.');
+  if (!pot.openForJoining) {
+    throw new PajoIntegrityError('POT_NOT_OPEN', 'This circle is not accepting join requests.');
+  }
+
+  const alreadyMember = await prisma.potMember.findUnique({
+    where: { potId_userId: { potId: pot.id, userId } },
+    select: { id: true },
+  });
+  if (alreadyMember) {
+    throw new PajoIntegrityError('ALREADY_MEMBER', 'You are already a member of this circle.');
+  }
+  if (pot._count.members >= pot.memberTarget) {
+    throw new PajoIntegrityError('POT_FULL', 'This circle is already full.');
+  }
+
+  const request = await prisma.potJoinRequest.upsert({
+    where: { potId_userId: { potId: pot.id, userId } },
+    update: { message: message ?? null, status: 'PENDING', reviewedBy: null, reviewedAt: null },
+    create: { potId: pot.id, userId, message: message ?? null, status: 'PENDING' },
+  });
+
+  const admins = await prisma.userMembership.findMany({
+    where: { organizationId: pot.organizationId, role: { in: ['ORG_ADMIN', 'ORG_MANAGER'] } },
+    select: { userId: true },
+  });
+
+  await Promise.all(
+    admins.map((a) =>
+      emitNotification({
+        userId: a.userId,
+        organizationId: pot.organizationId,
+        potId: pot.id,
+        type: 'TRANSACTIONAL',
+        category: 'invite',
+        title: `Join request for ${pot.name}`,
+        message: `${userEmail} would like to join ${pot.name}. Review the request in the circle's settings.`,
+        ctaUrl: `/pajo/${pot.slug}/settings`,
+        ctaText: 'Review request',
+      })
+    )
+  );
+
+  await createAuditLog({
+    organizationId: pot.organizationId, actorId: userId, actorEmail: userEmail,
+    action: 'pot.join_requested', resource: `pot:${pot.id}`, resourceType: 'pot',
+    details: { potId: pot.id, slug: pot.slug, requestId: request.id },
+  });
+
+  return request;
+}
+
+
+export type JoinRequestDecision = 'APPROVED' | 'REJECTED';
+
+export interface ReviewJoinRequestInput {
+  requestId: string;
+  decision: JoinRequestDecision;
+  actorId: string;
+  actorEmail: string;
+}
+
+/**
+ * Treasurer decision on a PENDING join request. Approval creates the PotMember
+ * (plus the org membership, matching the invite-link join path) inside one
+ * transaction, so a request can never end up "approved" without the member
+ * actually being in the pot. Rejection just closes the request.
+ * Callers must have verified the actor administers the pot's organisation.
+ */
+export async function reviewJoinRequest(input: ReviewJoinRequestInput) {
+  const { requestId, decision, actorId, actorEmail } = input;
+
+  const request = await prisma.potJoinRequest.findUnique({
+    where: { id: requestId },
+    include: {
+      pot: { select: { id: true, slug: true, name: true, organizationId: true, memberTarget: true } },
+      user: { select: { id: true, email: true } },
+    },
+  });
+  if (!request) throw new PajoIntegrityError('REQUEST_NOT_FOUND', 'This join request no longer exists.');
+
+  const { pot, user } = request;
+
+  if (decision === 'REJECTED') {
+    const rejected = await prisma.potJoinRequest.update({
+      where: { id: request.id },
+      data: { status: 'REJECTED', reviewedBy: actorId, reviewedAt: new Date() },
+    });
+
+    await createAuditLog({
+      organizationId: pot.organizationId, actorId, actorEmail,
+      action: 'pot.join_request_rejected', resource: `pot:${pot.id}`, resourceType: 'pot',
+      details: { potId: pot.id, requestId: request.id, memberEmail: user.email },
+    });
+
+    await emitNotification({
+      userId: user.id,
+      organizationId: pot.organizationId,
+      potId: pot.id,
+      type: 'TRANSACTIONAL',
+      category: 'system',
+      title: `Request declined - ${pot.name}`,
+      message: `Your request to join ${pot.name} was not approved. Please speak to the treasurer if you think this is a mistake.`,
+      ctaUrl: '/pajo',
+      ctaText: 'Back to my circles',
+    });
+
+    return rejected;
+  }
+
+  const memberCount = await prisma.potMember.count({ where: { potId: pot.id } });
+  if (memberCount >= pot.memberTarget) {
+    throw new PajoIntegrityError('POT_FULL', `This pot is full (${pot.memberTarget} members).`);
+  }
+
+  const existingMember = await prisma.potMember.findUnique({
+    where: { potId_userId: { potId: pot.id, userId: user.id } },
+    select: { id: true },
+  });
+
+  const approved = await prisma.$transaction(async (tx) => {
+    if (!existingMember) {
+      await tx.potMember.create({
+        data: {
+          potId: pot.id,
+          userId: user.id,
+          status: 'ACTIVE',
+          rulesAcceptedAt: new Date(),
+        },
+      });
+    }
+
+    const membership = await tx.userMembership.findUnique({
+      where: { userId_organizationId: { userId: user.id, organizationId: pot.organizationId } },
+    });
+    if (!membership) {
+      await tx.userMembership.create({
+        data: { userId: user.id, organizationId: pot.organizationId, role: 'CLIENT' },
+      });
+    }
+
+    return tx.potJoinRequest.update({
+      where: { id: request.id },
+      data: { status: 'APPROVED', reviewedBy: actorId, reviewedAt: new Date() },
+    });
+  });
+
+  await createAuditLog({
+    organizationId: pot.organizationId, actorId, actorEmail,
+    action: 'pot.join_request_approved', resource: `pot:${pot.id}`, resourceType: 'pot',
+    details: { potId: pot.id, requestId: request.id, memberEmail: user.email },
+  });
+
+  await emitNotification({
+    userId: user.id,
+    organizationId: pot.organizationId,
+    potId: pot.id,
+    type: 'TRANSACTIONAL',
+    category: 'system',
+    title: `You're in - ${pot.name}`,
+    message: `${actorEmail} approved your request to join ${pot.name}. Open the circle to see this week's contribution.`,
+    ctaUrl: `/pajo/${pot.slug}`,
+    ctaText: 'Open circle',
+  });
+
+  return approved;
+}
+
+/** Pending join requests for a pot, oldest first - treasurer review queue. */
+export async function getPendingJoinRequests(potId: string) {
+  return prisma.potJoinRequest.findMany({
+    where: { potId, status: 'PENDING' },
+    include: { user: { select: { id: true, email: true, name: true } } },
+    orderBy: { createdAt: 'asc' },
+  });
+}
+
