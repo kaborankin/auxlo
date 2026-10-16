@@ -19,6 +19,21 @@ export default async function PotLayout({
   params: Promise<{ potSlug: string }>;
 }) {
   const { potSlug } = await params;
+
+  const headerList = await headers();
+  const activePath = headerList.get('x-pathname') ?? '';
+
+  // The invitation/join route is the entry point for people who are NOT yet
+  // members of this pot - and who may not even be signed in yet. It renders its
+  // own full-screen chrome and re-validates the invite token server-side, so it
+  // must bypass this layout's shell AND its access checks. Without this, an
+  // invited person either loses the ?token= when redirected to sign-in, or -
+  // once signed in but not yet a PotMember - hits notFound() (a 404) on the very
+  // page that is meant to let them join.
+  if (activePath.endsWith('/join')) {
+    return <>{children}</>;
+  }
+
   const session = await getServerSession(authOptions);
 
   const preview = !session?.user?.email && isPajoPreviewMode();
@@ -50,9 +65,6 @@ export default async function PotLayout({
     role = access.role;
     userId = userProfile.id;
   }
-
-  const headerList = await headers();
-  const activePath = headerList.get('x-pathname') ?? '';
 
   return (
     <div className="flex h-screen overflow-hidden">
