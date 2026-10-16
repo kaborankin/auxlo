@@ -1,12 +1,5 @@
 import Link from 'next/link';
-import {
-  LayoutDashboard,
-  Users,
-  Wallet,
-  BookText,
-  ScrollText,
-  Settings,
-} from 'lucide-react';
+import { getPajoNavItems, isPajoNavActive } from './nav-items';
 
 interface SidebarProps {
   potSlug?: string;
@@ -16,26 +9,13 @@ interface SidebarProps {
 }
 
 /**
- * Pajo dashboard sidebar. Redesigned for Pajo Design v2.
- * Light, clean, and professional.
+ * Pajo dashboard sidebar. Desktop only — phones get the same tabs via
+ * MobileNav, both drawing from components/pajo/nav-items.ts.
  */
 export function Sidebar({ potSlug, potName, activePath, isAdmin }: SidebarProps) {
   const isGlobal = !potSlug;
   const base = isGlobal ? '/pajo' : `/pajo/${potSlug}`;
-
-  const navItems = isGlobal 
-    ? [
-        { label: 'Home', href: '/pajo', icon: LayoutDashboard },
-        { label: 'New Circle', href: '/pajo/new', icon: Settings },
-      ]
-    : [
-        { label: 'Overview', href: base, icon: LayoutDashboard },
-        { label: 'Ledger', href: `${base}/ledger`, icon: BookText },
-        { label: 'Members', href: `${base}/members`, icon: Users },
-        { label: 'Payouts', href: `${base}/payouts`, icon: Wallet },
-        { label: 'Rules', href: `${base}/rules`, icon: ScrollText },
-        ...(isAdmin ? [{ label: 'Settings', href: `${base}/settings`, icon: Settings }] : []),
-      ];
+  const navItems = getPajoNavItems({ potSlug, isAdmin });
 
   return (
     <aside className="hidden w-64 shrink-0 border-r border-pajo-border bg-pajo-surface lg:flex lg:flex-col">
@@ -57,7 +37,7 @@ export function Sidebar({ potSlug, potName, activePath, isAdmin }: SidebarProps)
       
       <nav className="flex-1 space-y-1 px-3">
         {navItems.map((item) => {
-          const active = activePath === item.href || (!isGlobal && item.href !== base && activePath.startsWith(item.href));
+          const active = isPajoNavActive({ item, activePath, isGlobal, base });
           const Icon = item.icon;
           return (
             <Link

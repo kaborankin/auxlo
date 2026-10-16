@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { NotificationDropdown } from './NotificationDropdown';
 
 interface TopbarProps {
@@ -6,16 +7,26 @@ interface TopbarProps {
   userEmail?: string | null;
   userId?: string | null;
   role: 'admin' | 'member' | null;
+  /** Mobile menu trigger, rendered before the title on small screens. */
+  mobileNav?: ReactNode;
 }
 
-export function Topbar({ title, subtitle, userEmail, userId, role }: TopbarProps) {
+export function Topbar({ title, subtitle, userEmail, userId, role, mobileNav }: TopbarProps) {
   return (
-    <header className="flex items-center justify-between border-b border-pajo-border bg-pajo-surface px-6 py-4">
-      <div>
-        <h2 className="font-manrope text-lg font-bold text-pajo-primary">{title}</h2>
-        {subtitle ? <p className="mt-0.5 text-xs text-pajo-secondary">{subtitle}</p> : null}
+    <header className="flex items-center justify-between gap-3 border-b border-pajo-border bg-pajo-surface px-4 py-3 sm:px-6 sm:py-4">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        {mobileNav}
+        <div className="min-w-0">
+          <h2 className="truncate font-manrope text-base font-bold text-pajo-primary sm:text-lg">
+            {title}
+          </h2>
+          {subtitle ? (
+            <p className="mt-0.5 truncate text-xs text-pajo-secondary">{subtitle}</p>
+          ) : null}
+        </div>
       </div>
-      <div className="flex items-center gap-5">
+
+      <div className="flex shrink-0 items-center gap-3 sm:gap-5">
         {userId && <NotificationDropdown userId={userId} />}
 
         <div className="flex items-center gap-3">
@@ -30,7 +41,12 @@ export function Topbar({ title, subtitle, userEmail, userId, role }: TopbarProps
               {role === 'admin' ? 'Treasurer' : 'Member'}
             </span>
           ) : null}
-          {userEmail ? <span className="text-xs font-medium text-pajo-secondary">{userEmail}</span> : null}
+          {/* The email is the biggest space thief on a phone — desktop only. */}
+          {userEmail ? (
+            <span className="hidden text-xs font-medium text-pajo-secondary lg:inline">
+              {userEmail}
+            </span>
+          ) : null}
         </div>
       </div>
     </header>

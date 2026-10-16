@@ -6,6 +6,7 @@ import prisma from '@/lib/db';
 import { getPajoAccess, isPajoPreviewMode } from '@/lib/pajo/access';
 import { Sidebar } from '@/components/pajo/Sidebar';
 import { Topbar } from '@/components/pajo/Topbar';
+import { MobileNav } from '@/components/pajo/MobileNav';
 
 /**
  * Pajo dashboard shell. Redesigned for Pajo Design v2.
@@ -80,9 +81,17 @@ export default async function PotLayout({
           subtitle={preview ? 'Preview mode — sign in for full access' : undefined}
           role={role}
           userEmail={session?.user?.email ?? null}
+          mobileNav={
+            <MobileNav
+              potSlug={potSlug}
+              potName={potName}
+              activePath={activePath}
+              isAdmin={role === 'admin' || preview}
+            />
+          }
           userId={userId}
         />
-        <main className="flex-1 overflow-y-auto bg-pajo-bg p-6 lg:p-8">
+        <main className="flex-1 overflow-y-auto bg-pajo-bg p-4 sm:p-6 lg:p-8">
           <div className="mx-auto max-w-7xl">
             {children}
           </div>

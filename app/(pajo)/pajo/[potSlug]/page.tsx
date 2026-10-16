@@ -1,6 +1,6 @@
 import { getServerSession } from 'next-auth';
 import { notFound } from 'next/navigation';
-import { CircleDollarSign, Users, Trophy, Wallet, UserPlus } from 'lucide-react';
+import { UserPlus } from 'lucide-react';
 import { authOptions } from '@/lib/auth-config';
 import { getPotOverview } from '@/lib/pajo/queries';
 import { getPajoAccess, isPajoPreviewMode } from '@/lib/pajo/access';
@@ -65,24 +65,21 @@ export default async function PotOverviewPage({
         />
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatCard
           label="Payout Amount"
           value={formatGBP(weeklyPayout, pot.currency)}
           hint={'Expected: ' + formatGBP(weeklyPayout, pot.currency)}
-          icon={CircleDollarSign}
         />
         <StatCard
           label="Members"
           value={memberCount + ' / ' + pot.memberTarget}
           hint={activeCycle ? 'Cycle ' + activeCycle.cycleNumber : 'Waiting to start'}
-          icon={Users}
         />
         <StatCard
           label="Week Collection"
           value={currentWeek ? formatGBP(currentWeek.totalCollected, pot.currency) : '—'}
           hint={currentWeek ? 'of ' + formatGBP(currentWeek.totalExpected, pot.currency) : undefined}
-          icon={Wallet}
           tone={
             currentWeek && currentWeek.totalCollected < currentWeek.totalExpected ? 'warning' : 'success'
           }
@@ -91,7 +88,6 @@ export default async function PotOverviewPage({
           label="Next Recipient"
           value={nextRecipient?.name ?? '—'}
           hint={nextRecipient ? 'Position #' + (nextRecipient.position ?? '—') : 'Final week'}
-          icon={Trophy}
         />
       </div>
 

@@ -13,7 +13,7 @@ import { Sidebar } from '@/components/pajo/Sidebar';
 import { EmptyDashboard } from '@/components/pajo/EmptyDashboard';
 import { DiscoverPots } from '@/components/pajo/DiscoverPots';
 import { timeAgo } from '@/lib/dashboard/format';
-import { CircleDollarSign, Users, Wallet, ArrowUpRight, AlertTriangle } from 'lucide-react';
+import { CircleDollarSign, ArrowUpRight } from 'lucide-react';
 
 function formatGBP(value: number, currency: string): string {
   const symbol = currency.toLowerCase() === 'gbp' ? '£' : currency.toUpperCase() + ' ';
@@ -55,7 +55,7 @@ export default async function PajoHomePage() {
             userId={userId || undefined}
           />
         )}
-        <main className="flex-1 overflow-y-auto p-6 lg:p-10">
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-10">
           <div className="mx-auto max-w-6xl space-y-10">
             <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
               <div>
@@ -76,28 +76,24 @@ export default async function PajoHomePage() {
               )}
             </header>
 
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
               <StatCard
                 label="Active Pots"
                 value={summary.activePots.toString()}
-                icon={Users}
               />
               <StatCard
                 label="This Week Collected"
                 value={formatGBP(summary.thisWeekCollected, summary.currency)}
-                icon={Wallet}
                 tone="success"
                 hint="Across all pots"
               />
               <StatCard
                 label="Upcoming Payouts"
                 value={formatGBP(summary.upcomingPayouts, summary.currency)}
-                icon={CircleDollarSign}
               />
               <StatCard
                 label="Outstanding"
                 value={formatGBP(summary.outstanding, summary.currency)}
-                icon={AlertTriangle}
                 tone={summary.outstanding > 0 ? 'warning' : 'default'}
                 hint="Not yet collected this week"
               />
